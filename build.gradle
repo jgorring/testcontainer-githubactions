@@ -1,0 +1,112 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        // https://github.com/melix/japicmp-gradle-plugin/issues/36
+        classpath 'com.google.guava:guava:30.1.1-jre'
+    }
+}
+
+plugins {
+    id 'io.franzbecker.gradle-lombok' version '4.0.0'
+    id 'com.github.johnrengelman.shadow' version '7.0.0'
+    id 'me.champeau.gradle.japicmp' version '0.2.9' apply false
+}
+
+apply from: "$rootDir/gradle/ci-support.gradle"
+
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'idea'
+    apply plugin: 'io.franzbecker.gradle-lombok'
+    apply from: "$rootDir/gradle/shading.gradle"
+
+    group = "org.testcontainers"
+
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+    compileJava.options.encoding = 'UTF-8'
+    compileTestJava.options.encoding = 'UTF-8'
+
+    repositories {
+        mavenCentral()
+    }
+
+    configurations {
+        provided
+        api.extendsFrom(provided)
+    }
+
+    lombok {
+        version = '1.18.20'
+    }
+
+    task delombok(type: io.franzbecker.gradle.lombok.task.DelombokTask) {
+        def outputDir = file("$buildDir/delombok")
+        outputs.dir(outputDir)
+        outputs.cacheIf {
+            true
+        }
+        for (srcDir in project.sourceSets.main.java.srcDirs) {
+            // TODO: named input and relative path for `srcDir` to make task more cacheable
+            inputs.dir(srcDir)
+            // TODO: `outputDir` as relative path to make task more cacheable 
+            args(srcDir, "-d", outputDir, "-f", "generateDelombokComment:skip")
+        }
+    }
+    delombok.onlyIf {
+        project.sourceSets.main.java.srcDirs.find { it.exists() }
+    }
+
+    // specific modules should be excluded from publication
+    if ( ! ["test-support", "jdbc-test"].contains(it.name) && !it.path.startsWith(":docs:") && it != project(":docs") ) {
+        apply from: "$rootDir/gradle/publishing.gradle"
+
+        if (it.name != "bom") {
+            apply plugin: "me.champeau.gradle.japicmp"
+            tasks.register('japicmp', me.champeau.gradle.japicmp.JapicmpTask)
+            apply from: "$rootDir/gradle/japicmp.gradle"
+        }
+    }
+
+    test {
+        defaultCharacterEncoding = "UTF-8"
+        testLogging {
+            displayGranularity 1
+            showStackTraces = true
+            exceptionFormat = 'full'
+            events "STARTED", "PASSED", "FAILED", "SKIPPED"
+        }
+    }
+
+    tasks.withType(Test).all {
+        reports {
+            junitXml.outputPerTestCase = true
+        }
+    }
+
+    // Ensure that Javadoc generation is always tested
+    check.dependsOn(javadoc)
+
+    def postCheckCommand = properties["postCheckCommand"]
+    if (postCheckCommand) {
+        check.finalizedBy(tasks.create("postCheckExec", Exec) {
+            if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+                commandLine('cmd', '/c', postCheckCommand)
+            } else {
+                commandLine('sh', '-c', postCheckCommand)
+            }
+        })
+    }
+
+    javadoc {
+        dependsOn delombok
+        source = delombok.outputs
+    }
+
+    dependencies {
+        testImplementation 'ch.qos.logback:logback-classic:1.2.3'
+    }
+}

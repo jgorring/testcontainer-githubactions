@@ -1,0 +1,118 @@
+apply plugin: 'com.github.johnrengelman.shadow'
+
+description = "Testcontainers Core"
+
+sourceSets {
+    jarFileTest
+}
+
+idea.module.testSourceDirs += sourceSets.jarFileTest.allSource.srcDirs
+
+shadowJar {
+    [
+        'META-INF/NOTICE',
+        'META-INF/NOTICE.txt',
+        'META-INF/LICENSE',
+        'META-INF/LICENSE.txt',
+        'META-INF/maven/',
+        'META-INF/proguard/',
+        'META-INF/versions/*/module-info.class',
+        'META-INF/services/java.security.Provider',
+    ].each { exclude(it) }
+}
+
+task jarFileTest(type: Test) {
+    testClassesDirs = sourceSets.jarFileTest.output.classesDirs
+    classpath = sourceSets.jarFileTest.runtimeClasspath
+
+    file(shadowJar.outputs.files.singleFile) // input for correct caching
+    systemProperty("jarFile", shadowJar.outputs.files.singleFile)
+
+    dependsOn(shadowJar)
+}
+project.tasks.check.dependsOn(jarFileTest)
+
+tasks.japicmp {
+    packageExcludes = [
+        "com.github.dockerjava.*",
+        "org.testcontainers.shaded.*",
+    ]
+
+    classExcludes = []
+
+    methodExcludes = []
+
+    fieldExcludes = []
+}
+
+configurations.all {
+    resolutionStrategy {
+        // use lower Jackson version
+        force 'com.fasterxml.jackson.core:jackson-databind:2.8.8'
+    }
+}
+
+dependencies {
+    baseline 'org.testcontainers:testcontainers:1.16.2', {
+        exclude group: "*", module: "*"
+    }
+
+    api 'junit:junit:4.13.2'
+    api 'org.slf4j:slf4j-api:1.7.32'
+    compileOnly 'org.jetbrains:annotations:23.0.0'
+    testCompileClasspath 'org.jetbrains:annotations:23.0.0'
+    api 'org.apache.commons:commons-compress:1.21'
+    api ('org.rnorth.duct-tape:duct-tape:1.0.8') {
+        exclude(group: 'org.jetbrains', module: 'annotations')
+    }
+
+    shaded 'org.awaitility:awaitility:4.1.1'
+
+    api platform('com.github.docker-java:docker-java-bom:3.2.12')
+    shaded platform('com.github.docker-java:docker-java-bom:3.2.12')
+
+    api "com.github.docker-java:docker-java-api"
+
+    shaded 'com.github.docker-java:docker-java-core'
+
+    shaded 'com.github.docker-java:docker-java-transport-okhttp', {
+        // TODO remove unused `net.java.dev.jna:jna-platform` from `docker-java-transport-okhttp`
+        exclude(group: 'net.java.dev.jna', module: 'jna-platform')
+    }
+
+    api 'com.github.docker-java:docker-java-transport-zerodep'
+
+    shaded "org.yaml:snakeyaml:1.29"
+
+    shaded 'org.glassfish.main.external:trilead-ssh2-repackaged:4.1.2'
+
+    shaded 'org.zeroturnaround:zt-exec:1.12'
+
+    testImplementation 'org.apache.httpcomponents:httpclient:4.5.9'
+    testImplementation 'redis.clients:jedis:3.7.0'
+    testImplementation 'com.rabbitmq:amqp-client:5.14.0'
+    testImplementation 'org.mongodb:mongo-java-driver:3.12.10'
+
+    testImplementation ('org.mockito:mockito-core:4.1.0') {
+        exclude(module: 'hamcrest-core')
+    }
+    // Synthetic JAR used for MountableFileTest and DirectoryTarResourceTest
+    testImplementation files('testlib/repo/fakejar/fakejar/0/fakejar-0.jar')
+
+    testImplementation 'org.rnorth.visible-assertions:visible-assertions:2.1.2'
+    testImplementation 'org.assertj:assertj-core:3.21.0'
+    testImplementation project(':test-support')
+
+    jarFileTestCompileOnly "org.projectlombok:lombok:${lombok.version}"
+    jarFileTestAnnotationProcessor "org.projectlombok:lombok:${lombok.version}"
+    jarFileTestImplementation 'junit:junit:4.13.2'
+    jarFileTestImplementation 'org.assertj:assertj-core:3.20.2'
+    jarFileTestImplementation 'org.ow2.asm:asm-debug-all:5.2'
+}
+
+tasks.generatePomFileForMavenJavaPublication.finalizedBy(
+    tasks.register('checkPOMdependencies', org.testcontainers.build.ComparePOMWithLatestReleasedTask) {
+        ignore = [
+        ]
+    }
+)

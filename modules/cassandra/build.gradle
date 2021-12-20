@@ -1,0 +1,6 @@
+description = "TestContainers :: Cassandra"
+
+dependencies {
+    api project(":database-commons")
+    api "com.datastax.cassandra:cassandra-driver-core:3.7.1"
+}

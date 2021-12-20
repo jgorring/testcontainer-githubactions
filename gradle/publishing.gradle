@@ -1,0 +1,100 @@
+apply plugin: 'maven-publish'
+
+task sourceJar(type: Jar) {
+    archiveClassifier.set( 'sources')
+    from sourceSets.main.allJava
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    archiveClassifier.set('javadoc')
+    from javadoc
+}
+
+jar.archiveClassifier.set("original")
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) { publication ->
+            artifactId = project.name
+            artifact sourceJar
+            artifact javadocJar
+
+            artifact project.tasks.jar
+            artifacts.removeAll { it.classifier == jar.archiveClassifier.get() }
+            artifact project.tasks.shadowJar
+
+            pom.withXml {
+                def rootNode = asNode()
+                rootNode.children().last() + {
+                    resolveStrategy = Closure.DELEGATE_FIRST
+
+                    name project.description
+                    description 'Isolated container management for Java code testing'
+                    url 'https://testcontainers.org'
+                    issueManagement {
+                        system 'GitHub'
+                        url 'https://github.com/testcontainers/testcontainers-java/issues'
+                    }
+                    licenses {
+                        license {
+                            name 'MIT'
+                            url 'http://opensource.org/licenses/MIT'
+                        }
+                    }
+                    scm {
+                        url 'https://github.com/testcontainers/testcontainers-java/'
+                        connection 'scm:git:git://github.com/testcontainers/testcontainers-java.git'
+                        developerConnection 'scm:git:ssh://git@github.com/testcontainers/testcontainers-java.git'
+                    }
+                    developers {
+                        developer {
+                            id 'rnorth'
+                            name 'Richard North'
+                            email 'rich.north@gmail.com'
+                        }
+                    }
+                }
+
+                def dependenciesNode = rootNode.appendNode('dependencies')
+
+                def addDependencies = { Configuration configuration, scope ->
+                    for (dependency in configuration.resolvedConfiguration.firstLevelModuleDependencies) {
+                        if (dependency.configuration.startsWith("platform-")) {
+                            continue
+                        }
+                        dependenciesNode.appendNode('dependency').with {
+                            if (!dependency.moduleGroup || !dependency.moduleName || !dependency.moduleVersion) {
+                                throw new IllegalStateException("Wrong dependency: $dependency")
+                            }
+                            appendNode('groupId', dependency.moduleGroup)
+                            appendNode('artifactId', dependency.moduleName)
+                            appendNode('version', dependency.moduleVersion)
+                            appendNode('scope', scope)
+
+                            if (dependency instanceof ModuleDependency && !dependency.excludeRules.empty) {
+                                def excludesNode = appendNode('exclusions')
+                                for (rule in dependency.excludeRules) {
+                                    excludesNode.appendNode('exclusion').with {
+                                        appendNode('groupId', rule.group)
+                                        appendNode('artifactId', rule.module)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                addDependencies(project.configurations.api, 'compile')
+                addDependencies(project.configurations.provided, 'provided')
+            }
+        }
+    }
+    repositories {
+        maven {
+            url("https://oss.sonatype.org/service/local/staging/deploy/maven2")
+            credentials {
+                username = System.getenv("OSSRH_USERNAME")
+                password = System.getenv("OSSRH_PASSWORD")
+            }
+        }
+    }
+}
